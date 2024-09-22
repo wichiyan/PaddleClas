@@ -226,10 +226,16 @@ class InputModelError(Exception):
         super().__init__(message)
 
 
+#初始化配置文件，配置文件可指定的参数，和使用yml文件中的参数一致
+#主要是加载预定义的配置文件，然后使用传入的参数，更新配置文件对应值
+#返回更新后的配置文件，字典
 def init_config(model_type, model_name, inference_model_dir, **kwargs):
 
+    #如果参数内有build_gallery，则使用deploy/configs/inference_general.yaml配置文件
     if kwargs.get("build_gallery", False):
         cfg_path = "deploy/configs/inference_general.yaml"
+        
+    #如果model_type是PULC，则结合模型名称，指定相应的配置文件，可以结合这里，查看支持的预训练模型，具体可以查看deploy/configs/PULC文件夹下
     elif model_type == "pulc":
         cfg_path = f"deploy/configs/PULC/{model_name}/inference_{model_name}.yaml"
     elif model_type == "shitu":
@@ -237,12 +243,16 @@ def init_config(model_type, model_name, inference_model_dir, **kwargs):
     else:
         cfg_path = "deploy/configs/inference_cls.yaml"
 
+    #拼接配置文件绝对路径，并读取配置文件
     __dir__ = os.path.dirname(__file__)
     cfg_path = os.path.join(__dir__, cfg_path)
     cfg = config.get_config(
         cfg_path, overrides=kwargs.get("override", None), show=False)
+    
+    #如果配置文件中有指定推理模型路径，代表不是ppshitu类
     if cfg.Global.get("inference_model_dir"):
         cfg.Global.inference_model_dir = inference_model_dir
+    #否则，代表是ppshitu，然后需要制定det和rec模型路径
     else:
         cfg.Global.rec_inference_model_dir = os.path.join(
             inference_model_dir,
@@ -250,16 +260,19 @@ def init_config(model_type, model_name, inference_model_dir, **kwargs):
         cfg.Global.det_inference_model_dir = os.path.join(
             inference_model_dir, "picodet_PPLCNet_x2_5_mainbody_lite_v1.0")
 
+    #如果参数有指定batch_size，则更新对应cfg参数
     if "batch_size" in kwargs and kwargs["batch_size"]:
         cfg.Global.batch_size = kwargs["batch_size"]
 
     if "use_gpu" in kwargs and kwargs["use_gpu"] is not None:
         cfg.Global.use_gpu = kwargs["use_gpu"]
+    #如果参数有指定use_gpu，但设备又不支持gpu，则预警，并自动切换为cpu    
     if cfg.Global.use_gpu and not paddle.device.is_compiled_with_cuda():
         msg = "The current running environment does not support the use of GPU. CPU has been used instead."
         logger.warning(msg)
         cfg.Global.use_gpu = False
 
+    #下面都是在使用传参更新配置文件中的值
     if "infer_imgs" in kwargs and kwargs["infer_imgs"]:
         cfg.Global.infer_imgs = kwargs["infer_imgs"]
     if "index_dir" in kwargs and kwargs["index_dir"]:
@@ -572,11 +585,14 @@ def check_model_file(model_type, model_name):
     return storage_directory()
 
 
-#返回一个PaddleClas类，而不是模型类，主要是用于推理使用，
+#返回一个PaddleClas类，而不是模型类，主要是用于推理使用
+#如果指定的是模型名称，则会自动加载对应默认的推理模型参数
+#如果指定的是模型推理文件夹，则会自动加载对应的模型参数
 class PaddleClas(object):
     """PaddleClas.
     """
 
+    #核心是初始化配置文件，以及预测器，用于推理
     def __init__(self,
                  build_gallery: bool=False,
                  gallery_image_root: str=None,
@@ -595,14 +611,19 @@ class PaddleClas(object):
             topk (int, optional): Return the top k prediction results with the highest score. Defaults to 5.
         """
         super().__init__()
-
+        
+        #指定是否构建参考库，这个是在图片比对和相似度召回的时候，会有用到
+        #如果是，则会构建参考库，否则，则不构建
         if build_gallery:
             self.model_type, inference_model_dir = self._check_input_model(
                 model_name
                 if model_name else "PP-ShiTuV2", inference_model_dir)
+            #初始化配置文件
             self._config = init_config(self.model_type, model_name
                                        if model_name else "PP-ShiTuV2",
                                        inference_model_dir, **kwargs)
+            
+            #如果指定了以下几个参数，则使用参数更新配置文件中的值
             if gallery_image_root:
                 self._config.IndexProcess.image_root = gallery_image_root
             if gallery_data_file:
@@ -618,7 +639,8 @@ class PaddleClas(object):
                 model_name, inference_model_dir)
             self._config = init_config(self.model_type, model_name,
                                        inference_model_dir, **kwargs)
-
+            
+            #如果是shitu模型，且不构建参考库，且指定了索引文件地址，则使用
             if self.model_type == "shitu":
                 if index_dir:
                     self._config.IndexProcess.index_dir = index_dir
@@ -632,6 +654,7 @@ class PaddleClas(object):
         """
         return self._config
 
+    #检查输入的模型名称或模型推理文件夹，是否合法，如果合法，就返回模型类型和模型推理文件夹，否则就报错
     def _check_input_model(self, model_name, inference_model_dir):
         """Check input model name or model files.
         """
@@ -684,6 +707,7 @@ class PaddleClas(object):
             raise InputModelError(err)
         return None
 
+    #根据输入，输出分类预测结果
     def predict_cls(self,
                     input_data: Union[str, np.array],
                     print_pred: bool=False) -> Generator[list, None, None]:
@@ -774,6 +798,7 @@ class PaddleClas(object):
                 prediction result(s) is zipped as a dict, that includs topk "class_ids", "scores" and "label_names".
                 The format of batch prediction result(s) is as follow: [{"class_ids": [...], "scores": [...], "label_names": [...]}, ...]
         """
+        #如果输入数据为空，则使用配置文件中指定的用于推理的图片文件
         if input_data is None and self._config.Global.infer_imgs:
             input_data = self._config.Global.infer_imgs
 

@@ -30,7 +30,7 @@ from .distill.afd_attention import LinearTransformStudent, LinearTransformTeache
 
 __all__ = ["build_model", "RecModel", "DistillationModel", "AttentionModel"]
 
-
+#按照配置文件中的arch，构建模型，并返回
 def build_model(config, mode="train"):
     arch_config = copy.deepcopy(config["Arch"])
     model_type = arch_config.pop("name")
