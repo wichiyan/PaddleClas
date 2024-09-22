@@ -463,7 +463,7 @@ def print_info():
     print("Powered by PaddlePaddle!".rjust(table_width))
     print("{}".format("-" * table_width))
 
-
+#获取所有IMN模型名称，返回模型名称列表
 def get_imn_model_names():
     """Get the model names list.
     """
@@ -487,7 +487,7 @@ def similar_model_names(name="", names=[], thresh=0.1, topk=5):
     similar_names = [names[s[0]] for s in scores[:min(topk, len(scores))]]
     return similar_names
 
-
+#将指定url文件，下载到指定文件路径，并包含进度条
 def download_with_progressbar(url, save_path):
     """Download from url with progressbar.
     """
@@ -508,9 +508,14 @@ def download_with_progressbar(url, save_path):
             f"Something went wrong while downloading file from {url}")
 
 
+#检查指定类型和指定模型名称，对应的模型推理文件是否存在，如果存在则加载，否则就下载
+#返回存储目录
 def check_model_file(model_type, model_name):
-    """Check the model files exist and download and untar when no exist.
     """
+    Check the model files exist and download and untar when no exist.
+    model_type:pulc、shitu、其他
+    """
+    #首先根据模型类别，初始化模型参数存储地址和下载地址
     if model_type == "pulc":
         storage_directory = partial(os.path.join, BASE_INFERENCE_MODEL_DIR,
                                     "PULC", model_name)
@@ -527,14 +532,22 @@ def check_model_file(model_type, model_name):
     tar_file_name_list = [
         "inference.pdiparams", "inference.pdiparams.info", "inference.pdmodel"
     ]
+    #拼接完整模型和参数本地存储文件路径
     model_file_path = storage_directory("inference.pdmodel")
     params_file_path = storage_directory("inference.pdiparams")
+    
+    #如果对应文件不存在，则下载并解压
     if not os.path.exists(model_file_path) or not os.path.exists(
             params_file_path):
+        #拼接临时文件地址
         tmp_path = storage_directory(url.split("/")[-1])
         logger.info(f"download {url} to {tmp_path}")
+        #创建存储目录
         os.makedirs(storage_directory(), exist_ok=True)
+        #将指定url的文件，下载到指定路径
         download_with_progressbar(url, tmp_path)
+        
+        #解压文件，且只解压推理模型相关文件，然后把压缩文件删除
         with tarfile.open(tmp_path, "r") as tarObj:
             for member in tarObj.getmembers():
                 filename = None
@@ -547,15 +560,19 @@ def check_model_file(model_type, model_name):
                 with open(storage_directory(filename), "wb") as f:
                     f.write(file.read())
         os.remove(tmp_path)
+        
+    #最后再检查下，如果指定模型和参数文件还是不存在，则报错  
     if not os.path.exists(model_file_path) or not os.path.exists(
             params_file_path):
         raise Exception(
             f"Something went wrong while praparing the model[{model_name}] files!"
         )
 
+    #返回存储目录
     return storage_directory()
 
 
+#返回一个PaddleClas类，而不是模型类，主要是用于推理使用，
 class PaddleClas(object):
     """PaddleClas.
     """
@@ -609,6 +626,7 @@ class PaddleClas(object):
             else:
                 self.predictor = ClsPredictor(self._config)
 
+    #返回配置参数字典
     def get_config(self):
         """Get the config.
         """
@@ -617,10 +635,12 @@ class PaddleClas(object):
     def _check_input_model(self, model_name, inference_model_dir):
         """Check input model name or model files.
         """
+        #定义所有可用的IMN、PULC、PP-ShiTu模型名称列表
         all_imn_model_names = get_imn_model_names()
         all_pulc_model_names = PULC_MODELS
         all_shitu_model_names = SHITU_MODELS
 
+        #如果有指定模型名称，
         if model_name:
             if model_name in all_imn_model_names:
                 inference_model_dir = check_model_file("imn", model_name)
@@ -646,6 +666,7 @@ class PaddleClas(object):
                                               similar_pulc_names)
                 err = f"{model_name} is not provided by PaddleClas. \nMaybe you want the : [{similar_names_str}]. \nIf you want to use your own model, please specify inference_model_dir!"
                 raise InputModelError(err)
+        #如果有指定推理模型文件夹  
         elif inference_model_dir:
             model_file_path = os.path.join(inference_model_dir,
                                            "inference.pdmodel")
@@ -656,6 +677,8 @@ class PaddleClas(object):
                 err = f"There is no model file or params file in this directory: {inference_model_dir}"
                 raise InputModelError(err)
             return "custom", inference_model_dir
+        
+        #必须至少指定模型名称，或者指定推理文件夹，否则就报错
         else:
             err = "Please specify the model name supported by PaddleClas or directory contained model files(inference.pdmodel, inference.pdiparams)."
             raise InputModelError(err)
@@ -809,7 +832,7 @@ class PaddleClas(object):
             raise ModuleNotFoundError
 
 
-# for CLI
+# for CLI，即使用命令行时，调用main函数
 def main():
     """Function API used for commad line.
     """
